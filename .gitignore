@@ -2,3 +2,4 @@ vendor
 .idea
 main
 main.exe
+conf/*
