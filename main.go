@@ -57,7 +57,7 @@ func main() {
 	// create reverse proxy
 	errorChannel := make(chan error)
 	for _, port := range Ports {
-		go func() {
+		go func(from, to string) {
 			// check port
 			if num, err := strconv.Atoi(port.From); err != nil || num < 0 || num > 65535 {
 				errorChannel <- errors.New("json error")
@@ -69,7 +69,7 @@ func main() {
 			// request
 			director := func(request *http.Request) {
 				request.URL.Scheme = "http"
-				request.URL.Host = ":" + port.To
+				request.URL.Host = ":" + to
 				if request.Header.Get("transparent-proxy") == "true" {
 					errorChannel <- errors.New("loop detected")
 				}
@@ -90,9 +90,9 @@ func main() {
 
 			// server
 			rp := &httputil.ReverseProxy{Director: director}
-			server := http.Server{Addr: ":" + port.From, Handler: rp}
+			server := http.Server{Addr: ":" + from, Handler: rp}
 			errorChannel <- server.ListenAndServe()
-		}()
+		}(port.From, port.To)
 	}
 
 	// catch goroutines error
