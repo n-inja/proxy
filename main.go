@@ -1,10 +1,10 @@
 package main
 
 import (
+	bytes2 "bytes"
 	"log"
 	"net/http"
 	"net/http/httputil"
-
 	"os"
 
 	"io/ioutil"
@@ -19,6 +19,7 @@ import (
 
 type Port struct {
 	From string `json:"from"`
+	Host string `json:"host"`
 	To   string `json:"to"`
 }
 
@@ -57,7 +58,7 @@ func main() {
 	// create reverse proxy
 	errorChannel := make(chan error)
 	for _, port := range Ports {
-		go func(from, to string) {
+		go func(from, host, to string) {
 			// check port
 			if num, err := strconv.Atoi(port.From); err != nil || num < 0 || num > 65535 {
 				errorChannel <- errors.New("json error")
@@ -68,12 +69,31 @@ func main() {
 
 			// request
 			director := func(request *http.Request) {
-				request.URL.Scheme = "http"
-				request.URL.Host = ":" + to
-				if request.Header.Get("transparent-proxy") == "true" {
+				url := *request.URL
+				url.Scheme = "http"
+				url.Host = host + ":" + to
+
+				var buf []byte
+				if request.Body != nil {
+					buf, err = ioutil.ReadAll(request.Body)
+					if err != nil {
+						errorChannel <- err
+					}
+				} else {
+					buf = make([]byte, 0)
+				}
+
+				req, err := http.NewRequest(request.Method, url.String(), bytes2.NewBuffer(buf))
+
+				if err != nil {
+					errorChannel <- err
+				}
+				req.Header = request.Header
+
+				if req.Header.Get("transparent-proxy") == "true" {
 					errorChannel <- errors.New("loop detected")
 				}
-				request.Header.Set("transparent-proxy", "true")
+				req.Header.Set("transparent-proxy", "true")
 
 				// certification
 				id := ""
@@ -85,14 +105,15 @@ func main() {
 					}
 				}
 
-				request.Header.Set("id", id)
+				req.Header.Set("id", id)
+				*request = *req
 			}
 
 			// server
 			rp := &httputil.ReverseProxy{Director: director}
 			server := http.Server{Addr: ":" + from, Handler: rp}
 			errorChannel <- server.ListenAndServe()
-		}(port.From, port.To)
+		}(port.From, port.Host, port.To)
 	}
 
 	// catch goroutines error
